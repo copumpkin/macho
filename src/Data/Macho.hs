@@ -373,7 +373,7 @@ getSegmentCommand32 mr fl mh = do
     nsects   <- liftM fromIntegral $ getWord32 mr
     flags    <- getSG_FLAG mr
     sects    <- sequence (replicate nsects (getSection32 mr fl mh))
-    return LC_SEGMENT MachoSegment
+    return $ LC_SEGMENT MachoSegment
                             { seg_segname = segname
                             , seg_vmaddr  = vmaddr
                             , seg_vmsize  = vmsize
@@ -394,7 +394,7 @@ getSegmentCommand64 mr fl mh = do
     nsects   <- liftM fromIntegral $ getWord32 mr
     flags    <- getSG_FLAG mr
     sects    <- sequence (replicate nsects (getSection64 mr fl mh))
-    return LC_SEGMENT_64 MachoSegment
+    return $ LC_SEGMENT_64 MachoSegment
                             { seg_segname = segname
                             , seg_vmaddr  = vmaddr
                             , seg_vmsize  = vmsize
@@ -1010,7 +1010,7 @@ getDySymTabCommand mr fl mh = do
     locreloff      <- liftM fromIntegral $ getWord32 mr
     nlocrel        <- liftM fromIntegral $ getWord32 mr
     locrels        <- return $ runGet (sequence (replicate nlocrel (getRel mr mh))) $ L.fromChunks [B.drop locreloff fl]
-    return LC_DYSYMTAB MachoDynamicSymbolTable
+    return $ LC_DYSYMTAB MachoDynamicSymbolTable
         { localSyms    = (ilocalsym, nlocalsym)
         , extDefSyms   = (iextdefsym, nextdefsym)
         , undefSyms    = (iundefsym, nundefsym)

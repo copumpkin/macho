@@ -1,5 +1,5 @@
 Name:          macho
-Version:       0.2
+Version:       0.21
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
@@ -16,10 +16,10 @@ Description:   Parser for Mach-O object format.
 Data-Files:    tests/Test.hs
 
 source-repository head
-  type:     darcs
-  location: http://code.fac9.com/macho/
+  type:     git
+  location: http://github.com/erikcharlebois/macho
 
 library
-    build-depends:   base, bytestring, binary
+    build-depends:   base >= 4 && < 5, bytestring, binary
     hs-source-dirs:  src
     exposed-modules: Data.Macho
