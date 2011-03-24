@@ -256,6 +256,7 @@ data MH_FILETYPE
     | MH_BUNDLE                   -- ^ dynamically bound bundle file
     | MH_DYLIB_STUB               -- ^ shared library stub for static. linking only, no section contents
     | MH_DSYM                     -- ^ companion file with only debug. sections
+    | MH_KEXT_BUNDLE
     deriving (Ord, Show, Eq, Enum)
     
 mach_filetype 0x1 = MH_OBJECT
@@ -267,6 +268,7 @@ mach_filetype 0x7 = MH_DYLINKER
 mach_filetype 0x8 = MH_BUNDLE
 mach_filetype 0x9 = MH_DYLIB_STUB
 mach_filetype 0xa = MH_DSYM
+mach_filetype 0xb = MH_KEXT_BUNDLE
 
 data MH_FLAGS
     = MH_NOUNDEFS                -- ^ the object file has no undefined references
@@ -275,6 +277,7 @@ data MH_FLAGS
     | MH_BINDATLOAD              -- ^ the object file's undefined references are bound by the dynamic linker when loaded.
     | MH_PREBOUND                -- ^ the file has its dynamic undefined references prebound.
     | MH_SPLIT_SEGS              -- ^ the file has its read-only and read-write segments split
+    | MH_LAZY_INIT
     | MH_TWOLEVEL                -- ^ the image is using two-level name space bindings
     | MH_FORCE_FLAT              -- ^ the executable is forcing all images to use flat name space bindings
     | MH_NOMULTIDEFS             -- ^ this umbrella guarantees no multiple defintions of symbols in its sub-images so the two-level namespace hints can always be used.
@@ -286,6 +289,7 @@ data MH_FLAGS
     | MH_WEAK_DEFINES            -- ^ the final linked image contains external weak symbols
     | MH_BINDS_TO_WEAK           -- ^ the final linked image uses weak symbols
     | MH_ALLOW_STACK_EXECUTION   -- ^ When this bit is set, all stacks  in the task will be given stack execution privilege.  Only used in MH_EXECUTE filetypes.
+    | MH_DEAD_STRIPPABLE_DYLIB
     | MH_ROOT_SAFE               -- ^ When this bit is set, the binary  declares it is safe for use in processes with uid zero
     | MH_SETUID_SAFE             -- ^ When this bit is set, the binary  declares it is safe for use in processes when issetugid() is true
     | MH_NO_REEXPORTED_DYLIBS    -- ^ When this bit is set on a dylib,  the static linker does not need to examine dependent dylibs to see if any are re-exported
@@ -295,8 +299,14 @@ data MH_FLAGS
 data LC_COMMAND
     = LC_SEGMENT MachoSegment                        -- ^ segment of this file to be mapped
     | LC_SYMTAB [MachoSymbol] B.ByteString           -- ^ static link-edit symbol table and stab info
+    | LC_SYMSEG
     | LC_THREAD [(Word32, [Word32])]                 -- ^ thread state information (list of (flavor, [long]) pairs)
     | LC_UNIXTHREAD [(Word32, [Word32])]             -- ^ unix thread state information (includes a stack) (list of (flavor, [long] pairs)
+    | LC_LOADFVMLIB
+    | LC_IDFVMLIB
+    | LC_IDENT
+    | LC_FVMFILE
+    | LC_PREPAGE
     | LC_DYSYMTAB MachoDynamicSymbolTable            -- ^ dynamic link-edit symbol table info
     | LC_LOAD_DYLIB String Word32 Word32 Word32      -- ^ load a dynamically linked shared library (name, timestamp, current version, compatibility version)
     | LC_ID_DYLIB String Word32 Word32 Word32        -- ^ dynamically linked shared lib ident (name, timestamp, current version, compatibility version)
@@ -310,6 +320,7 @@ data LC_COMMAND
     | LC_SUB_LIBRARY String                          -- ^ sub library (name)
     | LC_TWOLEVEL_HINTS [(Word32, Word32)]           -- ^ two-level namespace lookup hints (list of (subimage index, symbol table index) pairs
     | LC_PREBIND_CKSUM Word32                        -- ^ prebind checksum (checksum)
+
     | LC_LOAD_WEAK_DYLIB String Word32 Word32 Word32 -- ^ load a dynamically linked shared library that is allowed to be missing (symbols are weak imported) (name, timestamp, current version, compatibility version)
     | LC_SEGMENT_64 MachoSegment                     -- ^ 64-bit segment of this file to mapped
     | LC_ROUTINES_64 Word64 Word64                   -- ^ 64-bit image routines (virtual address of initialization routine, module index where it resides)
@@ -317,6 +328,11 @@ data LC_COMMAND
     | LC_RPATH String                                -- ^ runpath additions (path)
     | LC_CODE_SIGNATURE Word32 Word32                -- ^ local of code signature
     | LC_SEGMENT_SPLIT_INFO Word32 Word32            -- ^ local of info to split segments
+    | LC_REEXPORT_DYLIB
+    | LC_LAZY_LOAD_DYLIB
+    | LC_ENCRYPTION_INFO Word32 B.ByteString
+    | LC_DYLD_INFO
+    | LC_DYLD_INFO_ONLY
     deriving (Show, Eq)
 
 data VM_PROT
@@ -531,8 +547,8 @@ data DylibModule = DylibModule
     , dylib_ext_rel               :: (Word32, Word32) -- ^ (initial, count) pair of symbol table indices for externally referenced symbols
     , dylib_init                  :: (Word32, Word32) -- ^ (initial, count) pair of symbol table indices for the index of the module init section and the number of init pointers
     , dylib_term                  :: (Word32, Word32) -- ^ (initial, count) pair of symbol table indices for the index of the module term section and the number of term pointers
-    , dylib_objc_module_info_addr :: Word32           -- ^ statically linked address of the start of the data for this module in the __module_info section in the __OBJC segment
-    , dylib_objc_module_info_size :: Word64           -- ^ number of bytes of data for this module that are used in the __module_info section in the __OBJC segment
+    , dylib_objc_module_info_addr :: Word64           -- ^ statically linked address of the start of the data for this module in the __module_info section in the __OBJC segment
+    , dylib_objc_module_info_size :: Word32           -- ^ number of bytes of data for this module that are used in the __module_info section in the __OBJC segment
     } deriving (Show, Eq)
 
 -- | Platform-specific relocation types.
@@ -542,6 +558,13 @@ data R_TYPE
     | GENERIC_RELOC_SECTDIFF
     | GENERIC_RELOC_LOCAL_SECTDIFF
     | GENERIC_RELOC_PB_LA_PTR
+    | ARM_RELOC_VANILLA
+    | ARM_RELOC_PAIR
+    | ARM_RELOC_SECTDIFF
+    | ARM_RELOC_LOCAL_SECTDIFF
+    | ARM_RELOC_PB_LA_PTR
+    | ARM_RELOC_BR24
+    | ARM_THUMB_RELOC_BR22
     | X86_64_RELOC_BRANCH
     | X86_64_RELOC_GOT_LOAD
     | X86_64_RELOC_GOT
@@ -569,11 +592,19 @@ data R_TYPE
     | PPC_RELOC_LO14_SECTDIFF
     deriving (Ord, Show, Eq, Enum)
 
+
 r_type 0 CPU_TYPE_X86        = GENERIC_RELOC_VANILLA
 r_type 1 CPU_TYPE_X86        = GENERIC_RELOC_PAIR
 r_type 2 CPU_TYPE_X86        = GENERIC_RELOC_SECTDIFF
 r_type 3 CPU_TYPE_X86        = GENERIC_RELOC_LOCAL_SECTDIFF
 r_type 4 CPU_TYPE_X86        = GENERIC_RELOC_PB_LA_PTR
+r_type 0 CPU_TYPE_ARM        = ARM_RELOC_VANILLA
+r_type 1 CPU_TYPE_ARM        = ARM_RELOC_PAIR
+r_type 2 CPU_TYPE_ARM        = ARM_RELOC_SECTDIFF
+r_type 3 CPU_TYPE_ARM        = ARM_RELOC_LOCAL_SECTDIFF
+r_type 4 CPU_TYPE_ARM        = ARM_RELOC_PB_LA_PTR
+r_type 5 CPU_TYPE_ARM        = ARM_RELOC_BR24
+r_type 6 CPU_TYPE_ARM        = ARM_THUMB_RELOC_BR22
 r_type 0 CPU_TYPE_X86_64     = X86_64_RELOC_UNSIGNED
 r_type 1 CPU_TYPE_X86_64     = X86_64_RELOC_SIGNED
 r_type 2 CPU_TYPE_X86_64     = X86_64_RELOC_BRANCH

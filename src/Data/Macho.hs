@@ -87,6 +87,7 @@ getMachHeaderFlags = (| (getMachHeaderFlags_ 31) getWord32 |)
   getMachHeaderFlags_  4 word | testBit word  3 = MH_BINDATLOAD              : getMachHeaderFlags_  3 word
   getMachHeaderFlags_  5 word | testBit word  4 = MH_PREBOUND                : getMachHeaderFlags_  4 word
   getMachHeaderFlags_  6 word | testBit word  5 = MH_SPLIT_SEGS              : getMachHeaderFlags_  5 word
+  getMachHeaderFlags_  7 word | testBit word  6 = MH_LAZY_INIT               : getMachHeaderFlags_  6 word
   getMachHeaderFlags_  8 word | testBit word  7 = MH_TWOLEVEL                : getMachHeaderFlags_  7 word
   getMachHeaderFlags_  9 word | testBit word  8 = MH_FORCE_FLAT              : getMachHeaderFlags_  8 word
   getMachHeaderFlags_ 10 word | testBit word  9 = MH_NOMULTIDEFS             : getMachHeaderFlags_  9 word
@@ -102,6 +103,7 @@ getMachHeaderFlags = (| (getMachHeaderFlags_ 31) getWord32 |)
   getMachHeaderFlags_ 20 word | testBit word 19 = MH_SETUID_SAFE             : getMachHeaderFlags_ 19 word
   getMachHeaderFlags_ 21 word | testBit word 20 = MH_NO_REEXPORTED_DYLIBS    : getMachHeaderFlags_ 20 word
   getMachHeaderFlags_ 22 word | testBit word 21 = MH_PIE                     : getMachHeaderFlags_ 21 word
+  getMachHeaderFlags_ 23 word | testBit word 21 = MH_DEAD_STRIPPABLE_DYLIB   : getMachHeaderFlags_ 22 word
   getMachHeaderFlags_  n word = getMachHeaderFlags_ (n-1) word
 
 getLoadCommand :: Word32 -> B.ByteString -> B.ByteString -> MachoHeader -> Decoder LC_COMMAND
@@ -115,7 +117,7 @@ getLoadCommand 0x0000000d lc fl mh = getDylibCommand lc LC_ID_DYLIB
 getLoadCommand 0x0000000e lc fl mh = getDylinkerCommand lc LC_LOAD_DYLINKER
 getLoadCommand 0x0000000f lc fl mh = getDylinkerCommand lc LC_ID_DYLINKER
 getLoadCommand 0x00000010 lc fl mh = getPreboundDylibCommand lc
-getLoadCommand 0x00000011 lc fl mh = getRoutinesCommand LC_ROUTINES
+getLoadCommand 0x00000011 lc fl mh = getRoutinesCommand LC_ROUTINES getWord32
 getLoadCommand 0x00000012 lc fl mh = getSubFrameworkCommand lc
 getLoadCommand 0x00000013 lc fl mh = getSubUmbrellaCommand lc
 getLoadCommand 0x00000014 lc fl mh = getSubClientCommand lc
@@ -124,7 +126,7 @@ getLoadCommand 0x00000016 lc fl mh = getTwoLevelHintsCommand fl
 getLoadCommand 0x00000017 lc fl mh = getPrebindCkSumCommand
 getLoadCommand 0x80000018 lc fl mh = getDylibCommand lc LC_LOAD_WEAK_DYLIB
 getLoadCommand 0x00000019 lc fl mh = getSegmentCommand LC_SEGMENT_64 fl mh
-getLoadCommand 0x0000001a lc fl mh = getRoutinesCommand LC_ROUTINES_64
+getLoadCommand 0x0000001a lc fl mh = getRoutinesCommand LC_ROUTINES_64 getWord64
 getLoadCommand 0x0000001b lc fl mh = getUUIDCommand
 getLoadCommand 0x8000001c lc fl mh = getRPathCommand lc
 getLoadCommand 0x0000001d lc fl mh = getLinkEditCommand LC_CODE_SIGNATURE
@@ -166,14 +168,14 @@ getSG_FLAG = (| (getSG_FLAG_ 31) getWord32 |)
           getSG_FLAG_ n word = getSG_FLAG_ (n-1) word
           
 getSection fl mh = do
-  sectname  <- liftM (takeWhile (/= '\0') . C.unpack) $ lift (getByteString 16)
-  segname   <- liftM (takeWhile (/= '\0') . C.unpack) $ lift (getByteString 16)
+  sectname  <- (| (takeWhile (/= '\0') . C.unpack) (lift $ getByteString 16) |)
+  segname   <- (| (takeWhile (/= '\0') . C.unpack) (lift $ getByteString 16) |)
   addr      <- getWord
   size      <- getWord
   offset    <- getWord32
-  align     <- liftM (2 ^) $ getWord32
-  reloff    <- liftM fromIntegral $ getWord32
-  nreloc    <- liftM fromIntegral $ getWord32
+  align     <- (| (2 ^) getWord32 |)
+  reloff    <- (| fromIntegral getWord32 |)
+  nreloc    <- (| fromIntegral getWord32 |)
   relocs    <- decode (replicateM nreloc (getRel mh)) (L.fromChunks [B.drop reloff fl])
   flags     <- getWord32
   reserved1 <- getWord32
@@ -210,6 +212,7 @@ sectionSystemAttribute flags = sectionSystemAttribute_ 31 (flags .&. 0x00ffff00)
 
 nullStringAt offset      = B.takeWhile ((/=) 0) . B.drop offset
 substringAt  offset size = B.take size . B.drop offset
+
 getLC_STR lc = do
     offset <- liftM fromIntegral $ getWord32
     return $ C.unpack $ nullStringAt offset lc
@@ -249,9 +252,10 @@ getThreadCommand con = do
     flavours <- getThreadCommand_
     return $ con flavours
 
-getRoutinesCommand con = do
-    init_address <- getWord
-    init_module  <- getWord 
+getRoutinesCommand :: (a -> a -> b) -> (Decoder a) -> Decoder b
+getRoutinesCommand con dec = do
+    init_address <- dec
+    init_module  <- dec 
     replicateM_ 6 getWord
     return $ con init_address init_module
 
@@ -269,9 +273,8 @@ n_types n = if n .&. 0xe0 == 0 then
            else
                (True, False, n_type n, False)
 
-
 getSymbolName strsect = do
-    offset <- liftM fromIntegral $ getWord32
+    offset <- (| fromIntegral getWord32 |)
     return $ C.unpack $ C.takeWhile (/= '\0') $ B.drop offset strsect
 
 getNList :: B.ByteString -> MachoHeader -> Decoder MachoSymbol
@@ -319,8 +322,12 @@ getModule = do
     ninit_nterm           <- getWord32
     ninit                 <- return (ninit_nterm .&. 0x0000ffff)
     nterm                 <- return $ (ninit_nterm .&. 0xffff0000) `shiftR` 16
-    objc_module_info_addr <- getWord32 -- TODO: is this correct?
-    objc_module_info_size <- getWord
+    is64                  <- is64bit
+    (objc_module_info_addr, objc_module_info_size) <- 
+      if is64 then
+        (| getWord64 , getWord32 |)
+      else
+        (| getWord, getWord32 |)
     return DylibModule
         { dylib_module_name_offset    = module_name
         , dylib_ext_def_sym           = (iextdefsym, nextdefsym)
