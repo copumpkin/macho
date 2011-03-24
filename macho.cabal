@@ -20,6 +20,6 @@ source-repository head
   location: http://github.com/erikcharlebois/macho
 
 library
-    build-depends:   base >= 4 && < 5, bytestring, binary
+    build-depends:   base >= 4 && < 5, bytestring, binary, bimap
     hs-source-dirs:  src
-    exposed-modules: Data.Macho
+    exposed-modules: Data.Macho, Data.Macho.Types, Data.Macho.Put, Data.Macho.Get
