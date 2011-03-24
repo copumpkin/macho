@@ -105,7 +105,7 @@ getMachHeaderFlags = (| (getMachHeaderFlags_ 31) getWord32 |)
   getMachHeaderFlags_  n word = getMachHeaderFlags_ (n-1) word
 
 getLoadCommand :: Word32 -> B.ByteString -> B.ByteString -> MachoHeader -> Decoder LC_COMMAND
-getLoadCommand 0x00000001 lc fl mh = getSegmentCommand64 fl mh
+getLoadCommand 0x00000001 lc fl mh = getSegmentCommand LC_SEGMENT fl mh
 getLoadCommand 0x00000002 lc fl mh = getSymTabCommand fl mh
 getLoadCommand 0x00000004 lc fl mh = getThreadCommand LC_THREAD
 getLoadCommand 0x00000005 lc fl mh = getThreadCommand LC_UNIXTHREAD
@@ -115,7 +115,7 @@ getLoadCommand 0x0000000d lc fl mh = getDylibCommand lc LC_ID_DYLIB
 getLoadCommand 0x0000000e lc fl mh = getDylinkerCommand lc LC_LOAD_DYLINKER
 getLoadCommand 0x0000000f lc fl mh = getDylinkerCommand lc LC_ID_DYLINKER
 getLoadCommand 0x00000010 lc fl mh = getPreboundDylibCommand lc
-getLoadCommand 0x00000011 lc fl mh = getRoutinesCommand32
+getLoadCommand 0x00000011 lc fl mh = getRoutinesCommand LC_ROUTINES
 getLoadCommand 0x00000012 lc fl mh = getSubFrameworkCommand lc
 getLoadCommand 0x00000013 lc fl mh = getSubUmbrellaCommand lc
 getLoadCommand 0x00000014 lc fl mh = getSubClientCommand lc
@@ -123,13 +123,12 @@ getLoadCommand 0x00000015 lc fl mh = getSubLibraryCommand lc
 getLoadCommand 0x00000016 lc fl mh = getTwoLevelHintsCommand fl
 getLoadCommand 0x00000017 lc fl mh = getPrebindCkSumCommand
 getLoadCommand 0x80000018 lc fl mh = getDylibCommand lc LC_LOAD_WEAK_DYLIB
-getLoadCommand 0x00000019 lc fl mh = getSegmentCommand64 fl mh
-getLoadCommand 0x0000001a lc fl mh = getRoutinesCommand64
+getLoadCommand 0x00000019 lc fl mh = getSegmentCommand LC_SEGMENT_64 fl mh
+getLoadCommand 0x0000001a lc fl mh = getRoutinesCommand LC_ROUTINES_64
 getLoadCommand 0x0000001b lc fl mh = getUUIDCommand
 getLoadCommand 0x8000001c lc fl mh = getRPathCommand lc
 getLoadCommand 0x0000001d lc fl mh = getLinkEditCommand LC_CODE_SIGNATURE
 getLoadCommand 0x0000001e lc fl mh = getLinkEditCommand LC_SEGMENT_SPLIT_INFO
-
 
 getVM_PROT = (| (getVM_PROT_ 31) getWord32 |)
     where getVM_PROT_ 0 word = []
@@ -137,10 +136,6 @@ getVM_PROT = (| (getVM_PROT_ 31) getWord32 |)
           getVM_PROT_ 2 word | testBit word 1 = VM_PROT_WRITE   : getVM_PROT_ 1 word
           getVM_PROT_ 3 word | testBit word 2 = VM_PROT_EXECUTE : getVM_PROT_ 2 word
           getVM_PROT_ n word = getVM_PROT_ (n-1) word
-
-
-getSegmentCommand32 = getSegmentCommand LC_SEGMENT
-getSegmentCommand64 = getSegmentCommand LC_SEGMENT_64
 
 getSegmentCommand con fl mh = do
     segname  <- (| (takeWhile (/= '\0') . C.unpack) (lift $ getByteString 16) |)
@@ -254,19 +249,11 @@ getThreadCommand con = do
     flavours <- getThreadCommand_
     return $ con flavours
 
-getRoutinesCommand32 = do
-    init_address <- getWord32 
-    init_module  <- getWord32 
-    replicateM_ 6 getWord32
-    return $ LC_ROUTINES init_address init_module
-
-getRoutinesCommand64 = do
-    init_address <- getWord64
-    init_module  <- getWord64
-    replicateM_ 6 getWord64
-    return $ LC_ROUTINES_64 init_address init_module
-
-
+getRoutinesCommand con = do
+    init_address <- getWord
+    init_module  <- getWord 
+    replicateM_ 6 getWord
+    return $ con init_address init_module
 
 reference_flags word mh =
     if MH_TWOLEVEL `elem` mh_flags mh then
